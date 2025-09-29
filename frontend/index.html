@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>FYP Rule-based Chatbot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f7f7fb;
+      --panel: #ffffff;
+      --border: #e6e6ef;
+      --text: #222;
+      --muted: #666;
+      --you: #e8efff;
+      --bot: #f1f1f4;
+      --accent: #4f46e5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg); color: var(--text);
+      display: grid; place-items: center; min-height: 100dvh; padding: 16px;
+    }
+    .chat-wrap {
+      width: min(920px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      display: grid; grid-template-rows: auto 1fr auto;
+      height: min(80vh, 780px); box-shadow: 0 6px 24px rgba(0,0,0,.06);
+      overflow: hidden;
+    }
+    header {
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    header .dot { width: 10px; height: 10px; background: var(--accent); border-radius: 999px; }
+    header h1 { font-size: 16px; margin: 0; }
+    header p { margin: 0; font-size: 12px; color: var(--muted); }
+    .messages {
+      padding: 18px; overflow-y: auto; background: linear-gradient(#ffffff, #fff);
+    }
+    .msg {
+      display: grid; grid-template-columns: 40px 1fr; gap: 10px; margin-bottom: 14px;
+      align-items: flex-start;
+    }
+    .avatar {
+      width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+      background: #eef; color: #2a3a8f; border: 1px solid var(--border);
+    }
+    .avatar.bot { background: #eee; color: #333; }
+    .bubble {
+      padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border);
+      max-width: 100%; white-space: pre-wrap; word-wrap: break-word;
+    }
+    .you .bubble { background: var(--you); }
+    .bot .bubble { background: var(--bot); }
+    .time {
+      font-size: 11px; color: var(--muted); margin-top: 4px; user-select: none;
+    }
+    .inputbar {
+      display: grid; grid-template-columns: 1fr auto; gap: 10px;
+      padding: 12px; border-top: 1px solid var(--border); background: #fff;
+    }
+    textarea {
+      resize: none; min-height: 48px; max-height: 160px; padding: 12px 14px;
+      border-radius: 10px; border: 1px solid var(--border); outline: none;
+      font: inherit; line-height: 1.35; background: #fff;
+    }
+    textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.15); }
+    button {
+      padding: 0 18px; border: 1px solid var(--accent); background: var(--accent);
+      color: #fff; border-radius: 10px; font-weight: 600; cursor: pointer; min-width: 96px;
+    }
+    button[disabled] { opacity: .6; cursor: not-allowed; }
+    .typing {
+      display: inline-block; min-width: 36px; letter-spacing: 2px; color: var(--muted);
+    }
+    .links {
+      margin-top: 6px; font-size: 12px; color: var(--muted);
+    }
+    .links a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<div class="chat-wrap" id="app">
+  <header>
+    <div class="dot"></div>
+    <div>
+      <h1>FYP Rule-based Chatbot</h1>
+      <p>Ask about orders, refunds, products, etc.</p>
+    </div>
+  </header>
+
+  <div class="messages" id="messages" aria-live="polite"></div>
+
+  <form class="inputbar" id="form">
+    <textarea id="input" placeholder="Type a message… (Shift+Enter for newline)"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</div>
+
+<script src="./config.js"></script>
+
+<script>
+
+
+/* ---------- Config ---------- */
+// If you later add a config.js, define window.API_BASE there.
+// For local dev it will fall back to http://127.0.0.1:8000
+const API_BASE = (window.API_BASE || "http://127.0.0.1:8000").replace(/\/+$/,'');
+const CHAT_URL = API_BASE + "/chat";
+
+/* ---------- State ---------- */
+let ctx = {}; // conversation context returned by the API and sent back each turn
+const $msgs = document.getElementById("messages");
+const $form = document.getElementById("form");
+const $input = document.getElementById("input");
+const $send = document.getElementById("send");
+
+/* ---------- Helpers ---------- */
+function nowTime() {
+  return new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+function scrollToBottom() {
+  $msgs.scrollTop = $msgs.scrollHeight;
+}
+function addMsg(who, text, opts={}) {
+  const wrap = document.createElement("div");
+  wrap.className = `msg ${who}`;
+  const avatar = document.createElement("div");
+  avatar.className = `avatar ${who}`;
+  avatar.textContent = who === "you" ? "YOU" : "BOT";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text;
+  const time = document.createElement("div");
+  time.className = "time";
+  time.textContent = opts.time || nowTime();
+  const right = document.createElement("div");
+  right.appendChild(bubble);
+  right.appendChild(time);
+  wrap.appendChild(avatar);
+  wrap.appendChild(right);
+  $msgs.appendChild(wrap);
+  scrollToBottom();
+  return wrap;
+}
+function addTyping() {
+  const wrap = document.createElement("div");
+  wrap.className = "msg bot";
+  wrap.dataset.typing = "1";
+  const avatar = document.createElement("div");
+  avatar.className = "avatar bot";
+  avatar.textContent = "BOT";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  const span = document.createElement("span");
+  span.className = "typing";
+  let dots = 0;
+  const id = setInterval(() => {
+    dots = (dots + 1) % 4;
+    span.textContent = ".".repeat(dots) || ".";
+  }, 350);
+  bubble.appendChild(span);
+  const time = document.createElement("div");
+  time.className = "time";
+  time.textContent = nowTime();
+  const right = document.createElement("div");
+  right.appendChild(bubble);
+  right.appendChild(time);
+  wrap.appendChild(avatar);
+  wrap.appendChild(right);
+  $msgs.appendChild(wrap);
+  scrollToBottom();
+  return {wrap, stop: ()=> clearInterval(id)};
+}
+
+/* ---------- Init ---------- */
+addMsg("bot", "Hello! How can I assist you today?");
+$input.focus();
+
+/* ---------- Events ---------- */
+$form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const message = $input.value.trim();
+  if (!message) return;
+
+  // render user bubble
+  addMsg("you", message);
+  $input.value = "";
+
+  // show typing indicator
+  $send.disabled = true;
+  const typing = addTyping();
+
+  try {
+    const res = await fetch(CHAT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, context: ctx })
+    });
+    const data = await res.json();
+    typing.stop();
+    typing.wrap.remove();
+
+    // keep context for next turn
+    ctx = data.context || {};
+
+    // render bot reply
+    addMsg("bot", data.reply || "(No reply)");
+  } catch (err) {
+    typing.stop();
+    typing.wrap.remove();
+    addMsg("bot", "Network error. Please make sure the API is running at:\n" + CHAT_URL);
+    console.error(err);
+  } finally {
+    $send.disabled = false;
+    $input.focus();
+  }
+});
+
+// Enter to send; Shift+Enter for newline
+$input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $form.requestSubmit();
+  }
+});
+</script>
+</body>
+</html>
