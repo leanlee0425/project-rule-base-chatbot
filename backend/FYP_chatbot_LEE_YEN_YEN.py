@@ -623,7 +623,7 @@ FALLBACK_MENU = [
 ]
 
 def fallback_menu_text() -> str:
-    lines = ["Main menu:"]
+    lines = ["Main Menu:"]
     for i, (label, _) in enumerate(FALLBACK_MENU, 1):
         lines.append(f"{i}) {label}")
     lines.append("Please enter 1–6:")
@@ -953,13 +953,37 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
         return (FEEDBACK_PROMPT, ctx)
 
     # Early keyword router so typos like "woud" still work
-    txt = user_input.lower()
-    if conversation_context.get('waiting_for') is None and any(
-        k in txt for k in ("product", "products", "browse products", "shop", "catalog")
-    ):
+    txt = (user_input or "").lower()
+
+    # Words that mean "I want to browse the catalog"
+    BROWSE_TRIGGERS = (
+        "browse products", "browse product", "show products", "show product",
+        "product list", "list products", "see products", "view products",
+        "catalog", "shop"
+    )
+
+    # If user mentions these, DON'T open the catalog
+    BROWSE_BLOCKERS = (
+        "damage", "damaged", "broken", "defect", "faulty",
+        "refund", "return", "exchange", "warranty",
+        "lost", "missing", "never arrived",
+        "support", "contact", "help", "complaint"
+    )
+
+    def looks_like_browse(s: str) -> bool:
+        # explicit browse phrases win
+        if any(k in s for k in BROWSE_TRIGGERS):
+            return not any(b in s for b in BROWSE_BLOCKERS)
+        # generic "product(s)" must be paired with an action verb
+        if ("product" in s or "products" in s) and any(v in s for v in ("show","browse","see","list","view","buy","find")):
+            return not any(b in s for b in BROWSE_BLOCKERS)
+        return False
+
+    if conversation_context.get('waiting_for') is None and looks_like_browse(txt):
         ctx = _preserve_user(conversation_context)
         ctx['waiting_for'] = 'choose_product_section'
         return (PRODUCT_MENU_TEXT, ctx)
+
 
     # Entry point for product browsing
     if intent in ('product', 'browse_products', 'show_products'):
