@@ -13,6 +13,18 @@ import os
 
 DB_FILE = os.getenv("DB_FILE", r"D:\DB Browser for SQLite\chatbot_db.db")
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+FEEDBACK_PROMPT = (
+    "Thanks for your support! How do you feel about our service?\n"
+    "1) Good\n"
+    "2) OK ok only\n"
+    "3) Didn’t specifically answer my question\n"
+    "4) Others (please type your feedback)\n"
+    "Please enter 1–4:"
+)
+
+CLOSING_MSG = ("Thanks for your support! If anything else comes up, "
+               "please let me know and I’ll be very happy to assist you again!")
+
 
 # --- CONFIGURATION ---
 # DB_FILE = r"D:\DB Browser for SQLite\chatbot_db.db" # Updated to your file path
@@ -277,29 +289,51 @@ def ensure_order_tables():
             print("Error: Table 'faq_db_order_items' not found. Please create it or update the table name in code.")
             sys.exit(1)
 
+def ensure_feedback_table():
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS faq_db_chatbot_feedback (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER,
+              user_email TEXT,
+              rating INTEGER,
+              category TEXT,
+              comment TEXT,
+              created_at TEXT NOT NULL
+            )
+        """)
+
 def find_order_number(text: str) -> str | None:
     """Pull an order number from free text."""
     m = ORDER_NO_RE.search(text)
     return m.group(1) if m else None
 
-def fetch_open_orders_for_user(user_id: int) -> list[dict]:
-    """
-    Return all 'open' orders (processing / in_transit / shipped) for this user,
-    newest first.
-    """
+def fetch_open_orders_for_user(email: str) -> list[dict]:
     with sqlite3.connect(DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, customer_id, order_number, placed_at, status,
-                   shipping_carrier,
-                   tracking_number, eta_date
-            FROM faq_db_orders
-            WHERE customer_id = ?
-              AND lower(status) IN ('processing','in_transit')
-            ORDER BY datetime(placed_at) DESC, id DESC
-        """, (user_id,))
+            SELECT o.id, o.customer_id, o.order_number, o.placed_at, o.status,
+                   o.shipping_carrier, o.tracking_number, o.eta_date
+            FROM faq_db_orders o
+            JOIN user_profile u ON u.id = o.customer_id
+            WHERE lower(u.email) = lower(?)
+              AND lower(o.status) IN ('processing','in_transit','shipped')  -- include shipped if you want
+            ORDER BY datetime(o.placed_at) DESC, o.id DESC
+        """, (email,))
         return [dict(r) for r in cur.fetchall()]
+    
+def user_has_any_orders_by_email(email: str) -> bool:
+    with sqlite3.connect(DB_FILE) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT 1
+            FROM faq_db_orders o
+            JOIN user_profile u ON u.id = o.customer_id
+            WHERE lower(u.email) = lower(?)
+            LIMIT 1
+        """, (email,))
+        return cur.fetchone() is not None
 
 def fetch_order_bundle_by_id(order_id: int):
     """Fetch one order row by id and its items."""
@@ -600,11 +634,75 @@ def fallback_menu_resolve(n: int) -> str | None:
         return FALLBACK_MENU[n-1][1]  # return intent slug
     return None
 
+def insert_feedback(*, user_id: int | None, user_email: str | None,
+                    rating: int | None, category: str | None,
+                    comment: str | None):
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute("""
+            INSERT INTO faq_db_chatbot_feedback (user_id, user_email, rating, category, comment, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, user_email, rating, category, comment, datetime.utcnow().isoformat()))
+
 # --- 3. DECISION TREE (CONVERSATIONAL FLOW) & MAIN LOOP ---
 
 def chatbot_response(user_input, conversation_context, interactive: bool = True):
+
     def _preserve_user(ctx):
         return {'user': ctx.get('user')}
+    
+        # --- waiting: feedback choice (1–4) ---
+    if conversation_context.get('waiting_for') == 'feedback_choice':
+        choice = (user_input or "").strip().lower()
+        ctx_user = (conversation_context.get('user') or {})
+        user_id = ctx_user.get('user_id')
+        user_email = ctx_user.get('email')
+
+        # allow both numbers and words
+        mapping = {
+            "1": (1, "good"),
+            "good": (1, "good"),
+            "2": (2, "ok"),
+            "ok": (2, "ok"),
+            "ok ok only": (2, "ok"),
+            "3": (3, "not_answered"),
+            "didn’t specifically answer my question": (3, "not_answered"),
+            "didn't specifically answer my question": (3, "not_answered"),
+            "4": (4, "others"),
+            "others": (4, "others"),
+            "other": (4, "others"),
+        }
+
+        if choice in mapping:
+            rating, category = mapping[choice]
+            if rating == 4:  # needs free text
+                ctx = {'user': ctx_user, 'waiting_for': 'feedback_other_pending'}
+                return ("Please type your feedback:", ctx)
+
+            # immediate save for 1–3 (no comment)
+            insert_feedback(user_id=user_id, user_email=user_email,
+                            rating=rating, category=category, comment=None)
+            ctx = {'user': ctx_user, 'end_session': True}
+            return (CLOSING_MSG, ctx)
+
+        # invalid input → ask again
+        return ("Please enter 1, 2, 3, or 4.", conversation_context)
+
+
+    # --- waiting: feedback other (free text) ---
+    if conversation_context.get('waiting_for') == 'feedback_other_pending':
+        text = (user_input or "").strip()
+        if not text:
+            return ("Please type your feedback (cannot be empty):", conversation_context)
+
+        ctx_user = (conversation_context.get('user') or {})
+        user_id = ctx_user.get('user_id')
+        user_email = ctx_user.get('email')
+
+        insert_feedback(user_id=user_id, user_email=user_email,
+                        rating=4, category="others", comment=text)
+        ctx = {'user': ctx_user, 'end_session': True}
+        return ("Thanks! Your feedback has been recorded. Goodbye!", ctx)
+
 
     # --- A0) waiting: choose product section (1–5) ---
     if conversation_context.get('waiting_for') == 'choose_product_section':
@@ -706,6 +804,58 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
         # Optionally keep the list for quick back navigation:
         # ctx['waiting_for'] = 'choose_product_item'
         return (format_product_answer(product, facet=None), ctx)
+    
+    # --- waiting: confirm end of session (yes/no) ---
+    if conversation_context.get('waiting_for') == 'confirm_end':
+        # classify the user message using your DB
+        intent, _ = get_intent(user_input)
+
+        ctx = {'user': conversation_context.get('user', {})}
+        if intent == 'affirm':   # user says "yes/sure/ok"
+            ctx.pop('waiting_for', None)
+            # Your prompt text was "do you want to continue? (yes/no)"
+            # If YES means CONTINUE:
+            return ("Okay — how else can I help you?", ctx)
+            # If you prefer YES means END, swap to:
+            # ctx['end_session'] = True; return ("Goodbye!", ctx)
+
+        if intent == 'deny':     # user says "no/nope"
+            # If NO means END:
+            ctx['end_session'] = True
+            ctx.pop('waiting_for', None)
+            return ("Goodbye!", ctx)
+            # If NO means CONTINUE, swap accordingly.
+
+        # Not clearly affirm/deny → ask again, keep state
+        return ("Please answer yes or no.", conversation_context)
+    
+
+    # --- waiting: user provides email (Option B path) ---
+    if conversation_context.get('waiting_for') == 'provide_email':
+        email = user_input.strip()
+        if not re.match(EMAIL_REGEX, email):
+            return ("That doesn't look like a valid email. Please enter a valid email (e.g., jane@example.com).",
+                    conversation_context)
+
+        # Optional: remember email in context (no user_id needed for Option B)
+        ctx = {'user': {'email': email}}
+
+        # find open orders by email
+        open_orders = fetch_open_orders_for_user(email)
+        if open_orders:
+            menu_text = format_open_orders_menu(open_orders)
+            ctx['waiting_for'] = 'choose_order_to_track'
+            ctx['order_choice_ids'] = [o['id'] for o in open_orders]
+            return (menu_text, ctx)
+
+        # no open orders → check if they have any orders at all
+        if not user_has_any_orders_by_email(email):
+            ctx.pop('waiting_for', None)
+            return ("I couldn't find any orders for that email. Please create an account or check the email entered.", ctx)
+
+        # they have orders, but none active
+        ctx.pop('waiting_for', None)
+        return ("You currently have no processing or in-transit orders.", ctx)
 
     # --- AX) waiting: choose from main (fallback) menu ---
     if conversation_context.get('waiting_for') == 'fallback_menu_choice':
@@ -733,7 +883,7 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
             user = conversation_context.get('user') or {}
             user_id = user.get('user_id')
             if not user_id:
-                return ("I need to know who you are first. Please restart and provide your name + email.", ctx)
+                return ("I need to know who you are first. Please provide your email.", ctx)
             open_orders = fetch_open_orders_for_user(user_id)
             if not open_orders:
                 msg = ("I didn’t find any processing/in-transit orders. "
@@ -796,6 +946,12 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
     # --- B) normal intent detection ---
     intent, entity = get_intent(user_input)
 
+            # Map 'goodbye', 'affirm' (ok/sure/okay), and 'thanks' to feedback flow
+    if intent in ('goodbye', 'affirm', 'thanks'):
+        ctx = _preserve_user(conversation_context)
+        ctx['waiting_for'] = 'feedback_choice'
+        return (FEEDBACK_PROMPT, ctx)
+
     # Early keyword router so typos like "woud" still work
     txt = user_input.lower()
     if conversation_context.get('waiting_for') is None and any(
@@ -817,8 +973,10 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
         user = conversation_context.get('user') or {}
         user_id = user.get('user_id')
         if not user_id:
-            return ("I need to know who you are first. Please restart and provide your name + email.",
-                    _preserve_user(conversation_context))
+            ctx = _preserve_user(conversation_context)
+            ctx['waiting_for'] = 'provide_email'   # expect email next turn
+            return ("I need to know who you are first. Please provide your email.",ctx)
+                    # _preserve_user(conversation_context))
 
         # 2) fetch open orders (processing / shipped / in_transit)
         open_orders = fetch_open_orders_for_user(user_id)
@@ -832,9 +990,9 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
             return (menu_text, ctx)
 
         # 4) no open orders → check if this user has any orders at all
-        if not user_has_any_orders(user_id):
-            return ("You don't have any orders with us yet. Please create an account and place your first order. Is there anything else I can help you with?",
-                    _preserve_user(conversation_context))
+        if not user_has_any_orders_by_email(email):
+            ctx.pop('waiting_for', None)
+            return ("I couldn't find any orders for that email. Please create an account or check the email entered.", ctx)
 
         # 5) user has past orders but nothing active
         return ("You currently have no processing or in-transit orders.",
@@ -879,9 +1037,9 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
 
 
     if intent == 'goodbye':
-        response = get_answer_for_intent('goodbye')
-        ctx = _preserve_user(conversation_context); ctx['end_session'] = True
-        return response, ctx
+        ctx = _preserve_user(conversation_context)
+        ctx['waiting_for'] = 'confirm_end'
+        return ("Before I end the session, do you want to continue? (yes/no)", ctx)
 
     return get_answer_for_intent(intent), _preserve_user(conversation_context)
 
@@ -924,8 +1082,8 @@ def main():
 
     """Main function to run the chatbot."""
     setup_database()
-    # ensure_user_table()
     ensure_order_tables()
+    ensure_feedback_table()
 
     # 🔹 Single-shot capture
     user = capture_user_profile()
