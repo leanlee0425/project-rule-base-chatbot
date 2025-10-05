@@ -194,6 +194,7 @@ $form.addEventListener("submit", async (e) => {
   // show typing indicator
   $send.disabled = true;
   const typing = addTyping();
+  const started = performance.now();
 
   try {
     const res = await fetch(CHAT_URL, {
@@ -202,6 +203,14 @@ $form.addEventListener("submit", async (e) => {
       body: JSON.stringify({ message, context: ctx })
     });
     const data = await res.json();
+
+    // Ensure typing stays visible at least this long (ms)
+    const minDuration = 1200; // tweak 500–1200 to taste
+    const elapsed = performance.now() - started;
+    if (elapsed < minDuration) {
+      await new Promise(r => setTimeout(r, minDuration - elapsed));
+    }
+
     typing.stop();
     typing.wrap.remove();
 
@@ -210,6 +219,14 @@ $form.addEventListener("submit", async (e) => {
 
     // render bot reply
     addMsg("bot", data.reply || "(No reply)");
+      // 🔒 If backend ended the session, lock the input
+  if (ctx.end_session) {
+    $input.disabled = true;
+    $send.disabled = true;
+
+    // Optional: visually indicate it's closed
+    $input.placeholder = "Session ended. Refresh the page to start a new chat.";
+  }
   } catch (err) {
     typing.stop();
     typing.wrap.remove();
@@ -228,6 +245,8 @@ $input.addEventListener("keydown", (e) => {
     $form.requestSubmit();
   }
 });
+
+
 </script>
 </body>
 </html>
