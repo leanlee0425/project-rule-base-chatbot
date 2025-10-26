@@ -56,6 +56,7 @@
     msgs.appendChild(wrap);
     msgs.scrollTop = msgs.scrollHeight;
   }
+  
 
   function setTyping(on) {
     root.classList.toggle("typing", !!on);
@@ -85,6 +86,8 @@ closeBtn.addEventListener("click", () => {
     if (root.classList.contains("open")) closePanel();
     else openPanel();
   });
+
+
 
   // Optional greeting (only once per session)
 //   if (!sessionStorage.getItem("rb_greeted")) {

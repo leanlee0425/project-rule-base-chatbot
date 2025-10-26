@@ -11,7 +11,7 @@ from datetime import datetime
 import time, random, sys
 import os
 
-DB_FILE = os.getenv("DB_FILE", r"D:\DB Browser for SQLite\chatbot_db.db")
+DB_FILE = os.getenv("DB_FILE", os.path.join(os.path.dirname(__file__), "data", "chatbot_db.db"))
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
 FEEDBACK_PROMPT = (
     "Thanks for your support! How do you feel about our service?\n"
@@ -646,6 +646,12 @@ def insert_feedback(*, user_id: int | None, user_email: str | None,
 # --- 3. DECISION TREE (CONVERSATIONAL FLOW) & MAIN LOOP ---
 
 def chatbot_response(user_input, conversation_context, interactive: bool = True):
+    # ---- normalize user info ONCE ----
+    ctx_user = (conversation_context.get('user') or {})
+    if not isinstance(ctx_user, dict):
+        ctx_user = {}
+    user_id = ctx_user.get('user_id')
+    email = (ctx_user.get('email') or "").strip()   # always defined ("" if missing)
 
     def _preserve_user(ctx):
         return {'user': ctx.get('user')}
@@ -832,16 +838,19 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
 
     # --- waiting: user provides email (Option B path) ---
     if conversation_context.get('waiting_for') == 'provide_email':
-        email = user_input.strip()
-        if not re.match(EMAIL_REGEX, email):
+        email_in = (user_input or "").strip()
+        # email = user_input.strip()
+        if not re.match(EMAIL_REGEX, email_in):
             return ("That doesn't look like a valid email. Please enter a valid email (e.g., jane@example.com).",
                     conversation_context)
 
         # Optional: remember email in context (no user_id needed for Option B)
-        ctx = {'user': {'email': email}}
+        # ctx = {'user': {'email': email}}
+        ctx_user = (conversation_context.get('user') or {})
+        ctx = {'user': {**ctx_user, 'email': email_in}}  # merge email in
 
         # find open orders by email
-        open_orders = fetch_open_orders_for_user(email)
+        open_orders = fetch_open_orders_for_user(email_in)
         if open_orders:
             menu_text = format_open_orders_menu(open_orders)
             ctx['waiting_for'] = 'choose_order_to_track'
@@ -880,8 +889,8 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
 
         # Route by slug
         if slug == "track_order":
-            user = conversation_context.get('user') or {}
-            email = user.get('email')
+            # user = conversation_context.get('user') or {}
+            # email = user.get('email')
             if not email:
                 ctx['waiting_for'] = 'provide_email'
                 return ("I need to know who you are first. Please provide your email.", ctx)
@@ -1161,16 +1170,12 @@ def main():
                 continue
 
 def generate_reply_api(user_input: str, conversation_context: dict | None = None) -> tuple[str, dict]:
-    """
-    Public entry point for FastAPI.
-    - user_input: the user's message
-    - conversation_context: a dict you keep on the frontend between turns
-    Returns: (reply_text, new_context_dict)
-    """
-    if conversation_context is None:
+    if not isinstance(conversation_context, dict):
         conversation_context = {}
-
-    # IMPORTANT: non-interactive mode for API
+    # make sure we always have a dict user
+    u = conversation_context.get('user')
+    if not isinstance(u, dict):
+        conversation_context['user'] = {}
     reply, new_ctx = chatbot_response(user_input, conversation_context, interactive=False)
     return reply, new_ctx
 
