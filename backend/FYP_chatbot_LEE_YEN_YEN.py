@@ -218,7 +218,7 @@ def get_answer_for_intent(intent):
     # but this handles cases where an intent might not have a matching answer.
     if result is None:
         # Plain safe fallback (do NOT call fallback_menu here)
-        return "\nSorry, I couldn't understand your request. Please choose an option:"
+        return "Sorry, I couldn't understand your request. Please choose an option:"
     return result[0]
 
 
@@ -236,7 +236,7 @@ def fallback_menu():
         ("6) Need agent support", "send_glink"),
     ]
 
-    # print("\nSorry, I couldn't understand your request. Please choose an option:")
+    print("\nSorry, I couldn't understand your request. Please choose an option:")
     for i, (label, _) in enumerate(menu, 1):
         print(f"{i}. {label}")
 
@@ -318,7 +318,7 @@ def fetch_open_orders_for_user(email: str) -> list[dict]:
             FROM faq_db_orders o
             JOIN user_profile u ON u.id = o.customer_id
             WHERE lower(u.email) = lower(?)
-              AND lower(o.status) IN ('processing','in_transit','shipped')  -- include shipped if you want
+              AND lower(o.status) IN ('processing','in_transit')  -- include shipped if you want
             ORDER BY datetime(o.placed_at) DESC, o.id DESC
         """, (email,))
         return [dict(r) for r in cur.fetchall()]
@@ -623,7 +623,7 @@ FALLBACK_MENU = [
 ]
 
 def fallback_menu_text() -> str:
-    lines = ["Main menu:"]
+    lines = ["Main Menu:"]
     for i, (label, _) in enumerate(FALLBACK_MENU, 1):
         lines.append(f"{i}) {label}")
     lines.append("Please enter 1–6:")
@@ -881,14 +881,19 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
         # Route by slug
         if slug == "track_order":
             user = conversation_context.get('user') or {}
-            user_id = user.get('user_id')
-            if not user_id:
+            email = user.get('email')
+            if not email:
+                ctx['waiting_for'] = 'provide_email'
                 return ("I need to know who you are first. Please provide your email.", ctx)
-            open_orders = fetch_open_orders_for_user(user_id)
+
+            open_orders = fetch_open_orders_for_user(email)  # ✅ use email
             if not open_orders:
-                msg = ("I didn’t find any processing/in-transit orders. "
-                    "You can type an order number to search for a specific order.")
-                return (msg, ctx)
+                if not user_has_any_orders_by_email(email):  # ✅ use the email helper
+                    msg = ("I couldn't find any orders for that email. "
+                        "Please create an account or check the email entered.")
+                    return (msg, ctx)
+                return ("You currently have no processing or in-transit orders.", ctx)
+
             menu_text = format_open_orders_menu(open_orders)
             ctx['waiting_for'] = 'choose_order_to_track'
             ctx['order_choice_ids'] = [o['id'] for o in open_orders]
@@ -953,13 +958,37 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
         return (FEEDBACK_PROMPT, ctx)
 
     # Early keyword router so typos like "woud" still work
-    txt = user_input.lower()
-    if conversation_context.get('waiting_for') is None and any(
-        k in txt for k in ("product", "products", "browse products", "shop", "catalog")
-    ):
+    txt = (user_input or "").lower()
+
+    # Words that mean "I want to browse the catalog"
+    BROWSE_TRIGGERS = (
+        "browse products", "browse product", "show products", "show product",
+        "product list", "list products", "see products", "view products",
+        "catalog", "shop", "trending", "best sellers", "popular"
+    )
+
+    # If user mentions these, DON'T open the catalog
+    BROWSE_BLOCKERS = (
+        "damage", "damaged", "broken", "defect", "faulty",
+        "refund", "return", "exchange", "warranty",
+        "lost", "missing", "never arrived",
+        "support", "contact", "help", "complaint"
+    )
+
+    def looks_like_browse(s: str) -> bool:
+        # explicit browse phrases win
+        if any(k in s for k in BROWSE_TRIGGERS):
+            return not any(b in s for b in BROWSE_BLOCKERS)
+        # generic "product(s)" must be paired with an action verb
+        if ("product" in s or "products" in s) and any(v in s for v in ("show","browse","see","list","view","buy","find")):
+            return not any(b in s for b in BROWSE_BLOCKERS)
+        return False
+
+    if conversation_context.get('waiting_for') is None and looks_like_browse(txt):
         ctx = _preserve_user(conversation_context)
         ctx['waiting_for'] = 'choose_product_section'
         return (PRODUCT_MENU_TEXT, ctx)
+
 
     # Entry point for product browsing
     if intent in ('product', 'browse_products', 'show_products'):
@@ -971,7 +1000,7 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
     if intent == 'track_order':
         # 1) identify user
         user = conversation_context.get('user') or {}
-        user_id = user.get('user_id')
+        user_id = user.get('email')
         if not user_id:
             ctx = _preserve_user(conversation_context)
             ctx['waiting_for'] = 'provide_email'   # expect email next turn
@@ -979,10 +1008,18 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
                     # _preserve_user(conversation_context))
 
         # 2) fetch open orders (processing / shipped / in_transit)
-        open_orders = fetch_open_orders_for_user(user_id)
+        open_orders = fetch_open_orders_for_user(email)
 
         # 3) if any open orders → show numbered menu and wait for choice
         if open_orders:
+            if not open_orders:
+                if not user_has_any_orders_by_email(email):
+                    msg = ("I couldn't find any orders for that email. "
+                        "Please create an account or check the email entered.")
+                    return (msg, _preserve_user(conversation_context))
+                msg = ("You currently have no processing or in-transit orders.")
+                return (msg, _preserve_user(conversation_context))
+ 
             menu_text = format_open_orders_menu(open_orders)
             ctx = _preserve_user(conversation_context)
             ctx['waiting_for'] = 'choose_order_to_track'
@@ -1005,8 +1042,9 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
         if not interactive:
             ctx = _preserve_user(conversation_context)
             ctx['waiting_for'] = 'fallback_menu_choice'
+            apology = get_answer_for_intent('fallback')
             # Return the fallback menu prompt (non-blocking)
-            return (fallback_menu_text(), ctx)
+            return (apology + "\n\n" + fallback_menu_text(), ctx)
 
         # Interactive (terminal mode): keep your original behavior
         print(get_answer_for_intent('fallback'))
@@ -1018,7 +1056,7 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
         if selected_intent == 'track_order':
             user = conversation_context.get('user') or {}
             user_id = user.get('user_id')
-            open_orders = fetch_open_orders_for_user(user_id)
+            open_orders = fetch_open_orders_for_user(email)
             if not open_orders:
                 msg = ("I didn’t find any processing/in-transit orders. "
                        "You can type an order number to search for a specific order.")
