@@ -1,7 +1,17 @@
-fastapi
-redis
-types-redis
-uvicorn
-spacy==3.7.2
-# install the small English model at build time
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# spaCy + deps
+spacy==3.7.4
+blis==0.7.11
+catalogue==2.0.10
+murmurhash==1.0.10
+cymem==2.0.8
+preshed==3.0.9
+thinc==8.2.5
+srsly==2.4.8
+wasabi==1.1.3
+numpy<2.0.0
+
+# install the small English model during build
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
