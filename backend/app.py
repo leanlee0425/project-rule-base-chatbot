@@ -10,9 +10,8 @@ app = FastAPI(title="FYP Rule-based Chatbot API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://127.0.0.1:8080", "http://localhost:8080",  # python -m http.server
-        "http://127.0.0.1:5500", "http://localhost:5500",  # VS Code Live Server
-        "http://127.0.0.1:3000", "http://localhost:3000",  # other dev servers
+        "https://leanlee0425.github.io",
+        "http://127.0.0.1:5500","http://localhost:5500"
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -1,2 +1,2 @@
 // frontend/config.js
-window.API_BASE = "http://127.0.0.1:8000";  // FastAPI dev URL
+window.API_BASE = "https://fyp-rule-based-chatbot.onrender.com/";  // FastAPI dev URL
