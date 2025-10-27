@@ -1,6 +1,6 @@
 // frontend/website/chat/chat.js
 (function () {
-  const API_BASE = (window.API_BASE || "http://127.0.0.1:8000").replace(/\/+$/, "");
+  const API_BASE = (window.API_BASE || "https://fyp-rule-based-chatbot.onrender.com").replace(/\/+$/, "");
   const CHAT_URL = API_BASE + "/chat";
 
   // Persist context across pages (so navigation doesn’t lose the chat)
