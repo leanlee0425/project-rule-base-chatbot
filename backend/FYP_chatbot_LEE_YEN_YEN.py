@@ -548,11 +548,11 @@ def get_products_by_choice(choice: int, page: int = 1, page_size: int = 10) -> l
     return []
 
 SECTION_URLS = {
-    1: "https://your.site/shop?sort=trending",
-    2: "https://your.site/shop?sale=1",
-    3: "https://your.site/shop/men",
-    4: "https://your.site/shop/women",
-    5: "https://your.site/shop/accessories",
+    1: "https://leanlee0425.github.io/project-rule-base-chatbot/shop.html",
+    2: "https://leanlee0425.github.io/project-rule-base-chatbot/shop.html",
+    3: "https://leanlee0425.github.io/project-rule-base-chatbot/men_shop.html",
+    4: "https://leanlee0425.github.io/project-rule-base-chatbot/women_shop.html",
+    5: "https://leanlee0425.github.io/project-rule-base-chatbot/accessories_shop.html",
 }
 
 def format_product_list(products: list[dict]) -> str:
@@ -773,7 +773,7 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
                 price_txt = "Price N/A"
             lines.append(f"{i}) {p['name']} — {price_txt}{sku}")
         lines.append("\nReply with an item number to see details, or type 'menu' to go back.")
-        sec_url = SECTION_URLS.get(choice, "https://your.site/shop")
+        sec_url = SECTION_URLS.get(choice, "https://leanlee0425.github.io/project-rule-base-chatbot/shop.html")
         lines.append(f"More products: {sec_url}")
         menu_text = "\n".join(lines)
 
@@ -918,13 +918,13 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
             return (get_answer_for_intent('package_lost_damaged'), ctx)
 
         if slug == "contact_customer_support":
-            SUPPORT_FORM_URL = "https://example.com/support-form"
-            return (f"You can reach us here: {SUPPORT_FORM_URL}", ctx)
+            SUPPORT_FORM_URL = "leeyenyen@oum.edu.my"
+            return (f"You can reach us email us for more details: {SUPPORT_FORM_URL}", ctx)
 
         if slug == "send_glink":
-            SUPPORT_FORM_URL = "https://example.com/support-form"
+            SUPPORT_FORM_URL = "leeyenyen@oum.edu.my"
             ctx['end_session'] = True
-            return (f"I'm sorry I can’t resolve that here. Please fill out this form and our support team will contact you: {SUPPORT_FORM_URL}", ctx)
+            return (f"I'm sorry I can’t resolve that here. Please email us and our support team will contact you: {SUPPORT_FORM_URL}", ctx)
 
         # default guard (shouldn't hit)
         return ("Okay—back to the main menu. How can I help you?", ctx)
@@ -1076,8 +1076,8 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
             ctx['order_choice_ids'] = [o['id'] for o in open_orders]
             return (menu_text, ctx)
         if selected_intent == 'send_glink':
-            SUPPORT_FORM_URL = "https://example.com/support-form"
-            response = f"I'm sorry I can’t resolve that here. Please fill out this form and our support team will contact you: {SUPPORT_FORM_URL}"
+            SUPPORT_FORM_URL = "leeyenyen@oum.edu.my"
+            response = f"I'm sorry I can’t resolve that here. Please email us and our support team will contact you: {SUPPORT_FORM_URL}"
             ctx = _preserve_user(conversation_context); ctx['end_session'] = True
             return response, ctx
         return get_answer_for_intent(selected_intent), _preserve_user(conversation_context)
