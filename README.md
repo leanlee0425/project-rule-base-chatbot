@@ -61,20 +61,9 @@ Have 2 ways to clone repository:
    pip install -r requirements.txt
    ```
 
-   Navigate to **app.py**, add the following two lines for live in your local
-   ```bash
-    allow_origins=[
-        "https://leanlee0425.github.io",
-        "http://127.0.0.1:5500"
-        ,"http://localhost:5500"
-        ,"http://127.0.0.1:8080" << This
-        ,"http://localhost:8080" << This
-    ],
-   ```
-
 **3. Run the Server:**
 
-From the VS, create "New Terminal" > navigate to backend folder
+From the Visual Studio, go to the bottom right "+" sign to create "New Terminal" > navigate to backend folder
    ```bash
    uvicorn app:app --reload --port 8000
    ```
