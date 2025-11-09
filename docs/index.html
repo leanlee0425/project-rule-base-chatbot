@@ -260,3 +260,10 @@
 <link rel="stylesheet" href="chat/chat.css">
 <script src="chat/config.js"></script>
 <script src="chat/chat.js" defer></script>
+
+<script>
+  const isLocal = /^(localhost|127\.0\.0\.1)/.test(location.hostname);
+  window.API_BASE = isLocal
+    ? "http://127.0.0.1:8000"  // local FastAPI
+    : "https://fyp-rule-based-chatbot.onrender.com"; // Render
+</script>

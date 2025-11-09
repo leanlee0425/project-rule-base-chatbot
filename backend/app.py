@@ -9,10 +9,16 @@ app = FastAPI(title="FYP Rule-based Chatbot API")
 # Allow local dev frontends (adjust ports as needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://leanlee0425.github.io",
-        "http://127.0.0.1:5500","http://localhost:5500"
-    ],
+    allow_origins = [
+    "https://leanlee0425.github.io",   # GitHub Pages (prod/demo)
+    "http://127.0.0.1:5500",           # Local dev (Live Server)
+    "http://localhost:5500",
+    "http://127.0.0.1:8080",           # Optional: if you run on 8080
+    "http://localhost:8080",
+    # optional common dev ports:
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

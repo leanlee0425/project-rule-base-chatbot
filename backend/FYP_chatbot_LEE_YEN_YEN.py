@@ -634,14 +634,42 @@ def fallback_menu_resolve(n: int) -> str | None:
         return FALLBACK_MENU[n-1][1]  # return intent slug
     return None
 
-def insert_feedback(*, user_id: int | None, user_email: str | None,
-                    rating: int | None, category: str | None,
-                    comment: str | None):
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.execute("""
-            INSERT INTO faq_db_chatbot_feedback (user_id, user_email, rating, category, comment, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, user_email, rating, category, comment, datetime.utcnow().isoformat()))
+def insert_feedback(
+    *, user_id: int | None, user_email: str | None,
+    rating: int | None, category: str | None, comment: str | None
+) -> int:
+    import sqlite3
+    from datetime import datetime
+    import os
+
+    # 0) Make sure folder exists and show the exact DB path being used
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+    # print(f"[insert_feedback] DB_FILE = {os.path.abspath(DB_FILE)}")
+
+    # 1) Ensure table exists in API mode too
+    ensure_feedback_table()
+
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            # Optional: reduce Windows locking issues
+            conn.execute("PRAGMA journal_mode=WAL;")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO faq_db_chatbot_feedback
+                    (user_id, user_email, rating, category, comment, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, user_email, rating, category, comment, datetime.utcnow().isoformat()),
+            )
+            rid = cur.lastrowid
+            # show which DB file SQLite actually opened
+            dbg = conn.execute("PRAGMA database_list").fetchall()
+            # print(f"[insert_feedback] OK id={rid} | database_list={dbg}")
+            return rid
+    except sqlite3.Error as e:
+        # print(f"[insert_feedback] SQLITE ERROR: {e!r}")
+        raise
 
 # --- 3. DECISION TREE (CONVERSATIONAL FLOW) & MAIN LOOP ---
 
@@ -858,7 +886,8 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
             return (menu_text, ctx)
 
         # no open orders → check if they have any orders at all
-        if not user_has_any_orders_by_email(email):
+        if not user_has_any_orders_by_email(email_in):
+            # ctx = _preserve_user(conversation_context)
             ctx.pop('waiting_for', None)
             return ("I couldn't find any orders for that email. Please create an account or check the email entered.", ctx)
 
@@ -1009,8 +1038,8 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
     if intent == 'track_order':
         # 1) identify user
         user = conversation_context.get('user') or {}
-        user_id = user.get('email')
-        if not user_id:
+        email  = user.get('email')
+        if not email :
             ctx = _preserve_user(conversation_context)
             ctx['waiting_for'] = 'provide_email'   # expect email next turn
             return ("I need to know who you are first. Please provide your email.",ctx)
@@ -1037,6 +1066,7 @@ def chatbot_response(user_input, conversation_context, interactive: bool = True)
 
         # 4) no open orders → check if this user has any orders at all
         if not user_has_any_orders_by_email(email):
+            ctx = _preserve_user(conversation_context)
             ctx.pop('waiting_for', None)
             return ("I couldn't find any orders for that email. Please create an account or check the email entered.", ctx)
 
@@ -1130,7 +1160,7 @@ def main():
     """Main function to run the chatbot."""
     setup_database()
     ensure_order_tables()
-    ensure_feedback_table()
+    
 
     # 🔹 Single-shot capture
     user = capture_user_profile()
