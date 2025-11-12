@@ -1,3 +1,8 @@
+try {
+  sessionStorage.removeItem("rb_ctx");
+  sessionStorage.removeItem("rb_open");
+  sessionStorage.removeItem("rb_greeted");
+} catch {}
 // frontend/website/chat/chat.js
 (function () {
   const API_BASE = (window.API_BASE || "http://127.0.0.1:8000").replace(/\/+$/, "");
